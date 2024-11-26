@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { Chessboard } from "react-chessboard";
-import { v4 as uuidv4 } from "uuid"; // Use UUID for unique game IDs
+import { v4 as uuidv4 } from "uuid";
 
 let socket;
 
@@ -13,9 +13,7 @@ function App() {
 
     useEffect(() => {
         const connectSocket = () => {
-            console.log("Connecting to backend...");
-
-            socket = io("http://localhost:3000", {
+            socket = io(process.env.REACT_APP_BACKEND_URL || "http://localhost:3000", {
                 transports: ["websocket"],
                 reconnection: true,
                 reconnectionAttempts: Infinity,
@@ -24,56 +22,32 @@ function App() {
             });
 
             socket.on("connect", () => {
-                console.log("WebSocket connected successfully:", socket.id);
-                createOrJoinGame(); // Automatically join/create the default game on connect
+                createOrJoinGame();
             });
 
-            socket.on("updateFEN", (updatedFEN) => {
-                setFen(updatedFEN);
-            });
+            socket.on("updateFEN", setFen);
+            socket.on("updateCaptures", setCapturedPieces);
+            socket.on("updateHistory", setMoveHistory);
 
-            socket.on("updateCaptures", (captures) => {
-                setCapturedPieces(captures);
-            });
+            socket.on("debug", console.log);
 
-            socket.on("updateHistory", (history) => {
-                setMoveHistory(history);
-            });
-
-            socket.on("connect_error", (error) => {
-                console.error("WebSocket connection error:", error);
-            });
-
-            socket.on("disconnect", (reason) => {
-                console.warn("WebSocket disconnected. Reason:", reason);
-            });
-
-            socket.on("debug", (message) => {
-                console.log("Debug message from backend:", message);
-            });
+            return () => socket.disconnect();
         };
 
         connectSocket();
-
-        return () => {
-            if (socket) socket.disconnect();
-        };
     }, []);
 
     const createOrJoinGame = () => {
-        console.log(`Creating or joining game with ID: ${gameId}`);
         socket.emit("createGame", gameId);
     };
 
     const createNewGame = () => {
-        const newGameId = uuidv4(); // Generate a new unique game ID
-        setGameId(newGameId); // Update the state with the new game ID
-        console.log(`Creating new game with ID: ${newGameId}`);
+        const newGameId = uuidv4();
+        setGameId(newGameId);
         socket.emit("createGame", newGameId);
     };
 
     const resetCurrentGame = () => {
-        console.log(`Resetting game with ID: ${gameId}`);
         socket.emit("resetGame", gameId);
     };
 
