@@ -35,12 +35,15 @@ io.on("connection", (socket) => {
             gameId = uuidv4(); // Generate a unique ID for the game
         }
 
+        const inviteLink = `${process.env.CLIENT_URL || "http://localhost:3001"}/game/${gameId}`;
+
         if (!games[gameId]) {
             games[gameId] = {
                 chess: new Chess(),
                 moveHistory: [],
                 capturedPieces: { white: [], black: [] },
                 players: { white: null, black: null },
+                inviteLink,
             };
             console.log(`New game created: ${gameId}`);
         }
@@ -58,11 +61,12 @@ io.on("connection", (socket) => {
             id: gameId,
             white: game.players.white,
             black: game.players.black,
+            inviteLink,
         };
 
         socket.join(gameId);
         const currentFEN = game.chess.fen();
-        socket.emit("gameDetails", { gameId, players: game.players });
+        socket.emit("gameDetails", { gameId, players: game.players, inviteLink });
         socket.emit("updateFEN", currentFEN);
         socket.emit("updateCaptures", game.capturedPieces);
         socket.emit("updateHistory", game.moveHistory);
@@ -94,7 +98,7 @@ io.on("connection", (socket) => {
 
         socket.join(gameId);
         const currentFEN = game.chess.fen();
-        socket.emit("gameDetails", { gameId, players: game.players });
+        socket.emit("gameDetails", { gameId, players: game.players, inviteLink: game.inviteLink });
         socket.emit("updateFEN", currentFEN);
         socket.emit("updateCaptures", game.capturedPieces);
         socket.emit("updateHistory", game.moveHistory);
@@ -138,6 +142,15 @@ io.on("connection", (socket) => {
         }
 
         try {
+            const currentPlayer = socket.id;
+            const turnColor = game.chess.turn() === "w" ? "white" : "black";
+
+            // Check if the player is allowed to move
+            if (game.players[turnColor] !== currentPlayer) {
+                socket.emit("debug", "It's not your turn!");
+                return;
+            }
+
             const move = game.chess.move({ from, to });
             if (move) {
                 const updatedFEN = game.chess.fen();
@@ -155,7 +168,7 @@ io.on("connection", (socket) => {
 
                 if (game.chess.isCheckmate()) {
                     console.log(`Checkmate detected in game ${gameId}`);
-                    io.to(gameId).emit("gameOver", { reason: "checkmate", winner: move.color });
+                    io.to(gameId).emit("gameOver", { reason: "checkmate", winner: game.chess.turn() });
                 } else if (game.chess.isCheck()) {
                     console.log(`Check detected in game ${gameId}`);
                     io.to(gameId).emit("inCheck", game.chess.turn());

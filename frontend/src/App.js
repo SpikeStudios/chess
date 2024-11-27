@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { Chessboard } from "react-chessboard";
 import { v4 as uuidv4 } from "uuid";
+import { useParams, useNavigate } from "react-router-dom"; // React Router for invite links
 
 let socket;
 
@@ -16,34 +17,40 @@ function App() {
     const [check, setCheck] = useState(null);
     const [openGames, setOpenGames] = useState([]);
     const [showRolePopup, setShowRolePopup] = useState(false);
+    const { gameId: inviteGameId } = useParams(); // Read invite gameId from URL
+    const navigate = useNavigate();
 
     useEffect(() => {
-        const connectSocket = () => {
-            socket = io(process.env.REACT_APP_BACKEND_URL || "http://localhost:3000", {
-                transports: ["websocket"],
-                reconnection: true,
-                reconnectionAttempts: Infinity,
-                reconnectionDelay: 1000,
-                reconnectionDelayMax: 5000,
-            });
+        socket = io(process.env.REACT_APP_BACKEND_URL || "http://localhost:3000", {
+            transports: ["websocket"],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+        });
 
-            socket.on("connect", () => console.log("Connected to server:", socket.id));
-            socket.on("updateFEN", setFen);
-            socket.on("updateCaptures", setCapturedPieces);
-            socket.on("updateHistory", setMoveHistory);
-            socket.on("gameOver", ({ reason, winner }) => handleGameOver(reason, winner));
-            socket.on("inCheck", (turn) => handleCheck(turn));
-            socket.on("gameDetails", ({ gameId, players }) => {
-                setGameId(gameId);
-                setOrientation(players.white === socket.id ? "white" : "black");
-            });
-            socket.on("openGames", (games) => setOpenGames(games));
+        socket.on("connect", () => {
+            console.log("Connected to server:", socket.id);
+            if (inviteGameId) {
+                // Join game if accessed via invite link
+                joinGame(inviteGameId);
+            }
+        });
 
-            return () => socket.disconnect();
-        };
+        socket.on("updateFEN", setFen);
+        socket.on("updateCaptures", setCapturedPieces);
+        socket.on("updateHistory", setMoveHistory);
+        socket.on("gameOver", ({ reason, winner }) => handleGameOver(reason, winner));
+        socket.on("inCheck", (turn) => handleCheck(turn));
+        socket.on("gameDetails", ({ gameId, players }) => {
+            setGameId(gameId);
+            setOrientation(players.white === socket.id ? "white" : "black");
+            setRole(players.white === socket.id ? "white" : "black");
+        });
+        socket.on("openGames", setOpenGames);
 
-        connectSocket();
-    }, []);
+        return () => socket.disconnect();
+    }, [inviteGameId]);
 
     const createGame = () => {
         const newGameId = uuidv4();
@@ -84,8 +91,6 @@ function App() {
         setTimeout(() => setCheck(null), 3000);
     };
 
-    const closePopup = () => setCheckmate(null);
-
     const copyInviteLink = () => {
         const inviteLink = `${window.location.origin}/game/${gameId}`;
         navigator.clipboard.writeText(inviteLink);
@@ -103,9 +108,11 @@ function App() {
                 <button onClick={resetGame} style={styles.button}>
                     Reset Game
                 </button>
-                <button onClick={copyInviteLink} style={styles.button}>
-                    Copy Invite Link
-                </button>
+                {gameId && (
+                    <button onClick={copyInviteLink} style={styles.button}>
+                        Copy Invite Link
+                    </button>
+                )}
             </div>
 
             {showRolePopup && (
@@ -158,12 +165,15 @@ function App() {
                         animationDuration={200}
                         boardOrientation={orientation}
                         boardWidth={400}
+                        arePiecesDraggable={role === orientation}
                     />
                 </div>
                 <div style={styles.history}>
                     <h2>Move History</h2>
                     {moveHistory.map((move, index) => (
-                        <div key={index}>{index + 1}. {move}</div>
+                        <div key={index}>
+                            {index + 1}. {move}
+                        </div>
                     ))}
                 </div>
             </div>
@@ -173,7 +183,7 @@ function App() {
                 {openGames.map((game) => (
                     <li key={game.id}>
                         Game ID: {game.id}
-                        <button onClick={() => joinGame(game.id)} style={styles.joinButton}>
+                        <button onClick={() => navigate(`/game/${game.id}`)} style={styles.joinButton}>
                             Join
                         </button>
                     </li>
