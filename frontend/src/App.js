@@ -13,7 +13,9 @@ function App() {
     const [role, setRole] = useState("random"); // Player's role: "white", "black", or "random"
     const [orientation, setOrientation] = useState("white"); // Board orientation
     const [checkmate, setCheckmate] = useState(null); // Checkmate state
+    const [check, setCheck] = useState(null); // Check state
     const [openGames, setOpenGames] = useState([]); // List of open games
+    const [showRolePopup, setShowRolePopup] = useState(false); // Show popup for role selection
 
     useEffect(() => {
         const connectSocket = () => {
@@ -49,14 +51,20 @@ function App() {
     const createGame = () => {
         const newGameId = uuidv4();
         setGameId(newGameId);
-        const selectedRole = role === "random" ? (Math.random() > 0.5 ? "white" : "black") : role;
-        setOrientation(selectedRole === "white" ? "white" : "black");
-        socket.emit("createGame", { gameId: newGameId, role: selectedRole });
+        setShowRolePopup(true); // Show popup for role selection
+    };
+
+    const selectRole = (selectedRole) => {
+        setRole(selectedRole);
+        setShowRolePopup(false); // Close popup
+        const selectedOrientation = selectedRole === "random" ? (Math.random() > 0.5 ? "white" : "black") : selectedRole;
+        setOrientation(selectedOrientation);
+        socket.emit("createGame", { gameId, role: selectedRole });
     };
 
     const joinGame = (gameId) => {
         setGameId(gameId);
-        socket.emit("createGame", { gameId, role: "random" });
+        socket.emit("joinGame", gameId);
     };
 
     const resetGame = () => {
@@ -73,7 +81,9 @@ function App() {
     };
 
     const handleCheck = (turn) => {
-        console.log(`${turn === "w" ? "White" : "Black"} king is in check!`);
+        const checkColor = turn === "w" ? "White" : "Black";
+        setCheck(`${checkColor} king is in check!`);
+        setTimeout(() => setCheck(null), 3000); // Clear check highlight after 3 seconds
     };
 
     const closePopup = () => setCheckmate(null);
@@ -89,39 +99,24 @@ function App() {
                 <button onClick={resetGame} style={styles.button}>
                     Reset Game
                 </button>
-                <div style={styles.roleSelector}>
-                    <label>
-                        <input
-                            type="radio"
-                            name="role"
-                            value="white"
-                            checked={role === "white"}
-                            onChange={() => setRole("white")}
-                        />
-                        Play as White
-                    </label>
-                    <label>
-                        <input
-                            type="radio"
-                            name="role"
-                            value="black"
-                            checked={role === "black"}
-                            onChange={() => setRole("black")}
-                        />
-                        Play as Black
-                    </label>
-                    <label>
-                        <input
-                            type="radio"
-                            name="role"
-                            value="random"
-                            checked={role === "random"}
-                            onChange={() => setRole("random")}
-                        />
-                        Random
-                    </label>
-                </div>
             </div>
+
+            {showRolePopup && (
+                <div style={styles.popup}>
+                    <div style={styles.popupContent}>
+                        <h2>Select Your Role</h2>
+                        <button onClick={() => selectRole("white")} style={styles.popupButton}>
+                            Play as White
+                        </button>
+                        <button onClick={() => selectRole("black")} style={styles.popupButton}>
+                            Play as Black
+                        </button>
+                        <button onClick={() => selectRole("random")} style={styles.popupButton}>
+                            Random
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {checkmate && (
                 <div style={styles.popup}>
@@ -134,6 +129,12 @@ function App() {
                             New Game
                         </button>
                     </div>
+                </div>
+            )}
+
+            {check && (
+                <div style={styles.alert}>
+                    <p>{check}</p>
                 </div>
             )}
 
@@ -179,7 +180,6 @@ const styles = {
     container: { padding: "20px", textAlign: "center" },
     header: { fontSize: "24px", fontWeight: "bold", marginBottom: "20px" },
     controls: { marginBottom: "20px" },
-    roleSelector: { marginBottom: "20px", textAlign: "left" },
     gameArea: { display: "flex", justifyContent: "center", alignItems: "center" },
     captures: { margin: "10px", padding: "10px", border: "1px solid #ccc" },
     chessboard: { margin: "10px" },
@@ -228,6 +228,13 @@ const styles = {
         border: "none",
         borderRadius: "5px",
         cursor: "pointer",
+    },
+    alert: {
+        backgroundColor: "yellow",
+        padding: "10px",
+        borderRadius: "5px",
+        marginBottom: "10px",
+        fontWeight: "bold",
     },
 };
 

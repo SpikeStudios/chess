@@ -14,7 +14,8 @@ const io = new Server(server, {
     transports: ["websocket"],
 });
 
-const games = {};
+const games = {}; // Object to store active games and metadata
+const openGames = {}; // Object to store open game details for the lobby
 
 console.log("Server starting...");
 
@@ -23,12 +24,15 @@ io.on("connection", (socket) => {
 
     socket.on("disconnect", (reason) => {
         console.log(`Client disconnected: ${socket.id}, Reason: ${reason}`);
+        // Handle game cleanup if needed
     });
 
+    /**
+     * Create a new game
+     */
     socket.on("createGame", ({ gameId, role }) => {
-        if (!gameId || gameId === "default") {
-            gameId = uuidv4();
-            console.log(`Generated new unique game ID: ${gameId}`);
+        if (!gameId) {
+            gameId = uuidv4(); // Generate a unique ID for the game
         }
 
         if (!games[gameId]) {
@@ -36,87 +40,144 @@ io.on("connection", (socket) => {
                 chess: new Chess(),
                 moveHistory: [],
                 capturedPieces: { white: [], black: [] },
-                players: {
-                    white: role === "white" ? socket.id : null,
-                    black: role === "black" ? socket.id : null,
-                },
+                players: { white: null, black: null },
             };
             console.log(`New game created: ${gameId}`);
-        } else {
-            const players = games[gameId].players;
-            if (role === "white" && !players.white) players.white = socket.id;
-            if (role === "black" && !players.black) players.black = socket.id;
         }
+
+        const game = games[gameId];
+
+        // Assign role to the creator
+        if (role === "white" || (role === "random" && Math.random() > 0.5)) {
+            game.players.white = socket.id;
+        } else {
+            game.players.black = socket.id;
+        }
+
+        openGames[gameId] = {
+            id: gameId,
+            white: game.players.white,
+            black: game.players.black,
+        };
 
         socket.join(gameId);
-        const currentFEN = games[gameId].chess.fen();
-        io.to(gameId).emit("gameDetails", { gameId, players: games[gameId].players });
+        const currentFEN = game.chess.fen();
+        socket.emit("gameDetails", { gameId, players: game.players });
         socket.emit("updateFEN", currentFEN);
-        socket.emit("updateCaptures", games[gameId].capturedPieces);
-        socket.emit("updateHistory", games[gameId].moveHistory);
+        socket.emit("updateCaptures", game.capturedPieces);
+        socket.emit("updateHistory", game.moveHistory);
+
+        console.log(`Game ${gameId} created with role: ${role}`);
+        io.emit("openGames", Object.values(openGames)); // Notify clients of open games
     });
 
-    socket.on("resetGame", (gameId) => {
-        if (!games[gameId]) {
-            console.log(`Game not found for reset: ${gameId}`);
-            socket.emit("debug", "Game not found for reset.");
-            return;
-        }
-
-        games[gameId].chess = new Chess();
-        games[gameId].moveHistory = [];
-        games[gameId].capturedPieces = { white: [], black: [] };
-
-        const resetFEN = games[gameId].chess.fen();
-        io.to(gameId).emit("updateFEN", resetFEN);
-        io.to(gameId).emit("updateCaptures", games[gameId].capturedPieces);
-        io.to(gameId).emit("updateHistory", games[gameId].moveHistory);
-    });
-
-    socket.on("makeMove", ({ from, to, gameId }) => {
+    /**
+     * Join an existing game
+     */
+    socket.on("joinGame", (gameId) => {
         const game = games[gameId];
 
         if (!game) {
-            console.log(`Game not found: ${gameId}`);
             socket.emit("debug", "Game not found!");
             return;
         }
 
-        const chess = game.chess;
+        // Assign role to the joining player
+        if (!game.players.white) {
+            game.players.white = socket.id;
+        } else if (!game.players.black) {
+            game.players.black = socket.id;
+        } else {
+            socket.emit("debug", "Game is full!");
+            return;
+        }
+
+        socket.join(gameId);
+        const currentFEN = game.chess.fen();
+        socket.emit("gameDetails", { gameId, players: game.players });
+        socket.emit("updateFEN", currentFEN);
+        socket.emit("updateCaptures", game.capturedPieces);
+        socket.emit("updateHistory", game.moveHistory);
+
+        console.log(`Player joined game ${gameId}`);
+        io.emit("openGames", Object.values(openGames)); // Update open games for clients
+    });
+
+    /**
+     * Reset a game
+     */
+    socket.on("resetGame", (gameId) => {
+        const game = games[gameId];
+
+        if (!game) {
+            socket.emit("debug", "Game not found for reset.");
+            return;
+        }
+
+        game.chess = new Chess();
+        game.moveHistory = [];
+        game.capturedPieces = { white: [], black: [] };
+
+        const resetFEN = game.chess.fen();
+        io.to(gameId).emit("updateFEN", resetFEN);
+        io.to(gameId).emit("updateCaptures", game.capturedPieces);
+        io.to(gameId).emit("updateHistory", game.moveHistory);
+
+        console.log(`Game reset: ${gameId}`);
+    });
+
+    /**
+     * Make a move
+     */
+    socket.on("makeMove", ({ from, to, gameId }) => {
+        const game = games[gameId];
+
+        if (!game) {
+            socket.emit("debug", "Game not found!");
+            return;
+        }
 
         try {
-            const move = chess.move({ from, to });
+            const move = game.chess.move({ from, to });
             if (move) {
-                const updatedFEN = chess.fen();
-                console.log(`Valid move made. Updated FEN for game ${gameId}: ${updatedFEN}`);
+                const updatedFEN = game.chess.fen();
                 game.moveHistory.push(`${from}-${to}`);
 
                 if (move.captured) {
                     const capturedPiece = move.captured.toUpperCase();
                     const capturingSide = move.color === "w" ? "black" : "white";
                     game.capturedPieces[capturingSide].push(capturedPiece);
+                    io.to(gameId).emit("updateCaptures", game.capturedPieces);
                 }
 
                 io.to(gameId).emit("updateFEN", updatedFEN);
                 io.to(gameId).emit("updateHistory", game.moveHistory);
-                io.to(gameId).emit("updateCaptures", game.capturedPieces);
 
-                if (chess.in_checkmate()) {
+                if (game.chess.in_checkmate()) {
                     console.log(`Checkmate detected in game ${gameId}`);
                     io.to(gameId).emit("gameOver", { reason: "checkmate", winner: move.color });
-                } else if (chess.in_check()) {
-                    io.to(gameId).emit("inCheck", chess.turn());
+                } else if (game.chess.in_check()) {
+                    console.log(`Check detected in game ${gameId}`);
+                    io.to(gameId).emit("inCheck", game.chess.turn());
                 }
             } else {
-                socket.emit("debug", "Invalid move! Try again.");
+                socket.emit("debug", "Invalid move! Please try again.");
             }
         } catch (error) {
-            console.error(`Error processing move for game ${gameId}: ${error.message}`);
+            console.error(`Error processing move for game ${gameId}:`, error.message);
+            socket.emit("debug", `Error: ${error.message}`);
         }
     });
 
+    /**
+     * Update open games list
+     */
+    setInterval(() => {
+        io.emit("openGames", Object.values(openGames));
+    }, 5000);
+
     socket.on("error", (error) => {
-        console.error(`Socket error on ${socket.id}: ${error.message}`);
+        console.error(`Socket error on ${socket.id}:`, error.message);
     });
 });
 
