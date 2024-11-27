@@ -11,11 +11,12 @@ function App() {
     const [gameId, setGameId] = useState(null);
     const [capturedPieces, setCapturedPieces] = useState({ white: [], black: [] });
     const [moveHistory, setMoveHistory] = useState([]);
-    const [role, setRole] = useState("random");
+    const [role, setRole] = useState(null); // "white", "black", or "random"
     const [orientation, setOrientation] = useState("white");
+    const [waitingForPlayer, setWaitingForPlayer] = useState(false);
     const [checkmate, setCheckmate] = useState(null);
     const [check, setCheck] = useState(null);
-    const [waitingForPlayer, setWaitingForPlayer] = useState(false); // Waiting state
+    const [showRolePopup, setShowRolePopup] = useState(false);
     const [openGames, setOpenGames] = useState([]);
     const navigate = useNavigate();
 
@@ -41,6 +42,7 @@ function App() {
                 setWaitingForPlayer(false); // Close waiting popup
             });
             socket.on("openGames", (games) => setOpenGames(games));
+            socket.on("startGame", () => setWaitingForPlayer(false));
 
             return () => socket.disconnect();
         };
@@ -51,17 +53,30 @@ function App() {
     const createGame = () => {
         const newGameId = uuidv4();
         setGameId(newGameId);
-        setWaitingForPlayer(true); // Show waiting popup
+        setShowRolePopup(true); // Show popup for role selection
+    };
+
+    const selectRole = (selectedRole) => {
+        setRole(selectedRole);
+        setShowRolePopup(false); // Close popup
         const selectedOrientation =
-            role === "random" ? (Math.random() > 0.5 ? "white" : "black") : role;
+            selectedRole === "random" ? (Math.random() > 0.5 ? "white" : "black") : selectedRole;
         setOrientation(selectedOrientation);
-        socket.emit("createGame", { gameId: newGameId, role });
+        setWaitingForPlayer(true); // Show waiting popup
+        socket.emit("createGame", { gameId, role: selectedRole });
     };
 
     const cancelInvite = () => {
-        setWaitingForPlayer(false); // Close popup
-        setGameId(null); // Clear game ID
-        socket.emit("cancelGame", gameId); // Notify backend to remove game
+        setWaitingForPlayer(false);
+        setGameId(null);
+        socket.emit("cancelGame", gameId); // Notify backend
+    };
+
+    const handleInviteLink = () => {
+        const inviteLink = `${window.location.origin}/game/${gameId}`;
+        navigator.clipboard.writeText(inviteLink);
+        alert(`Invite link copied: ${inviteLink}`);
+        navigate(`/game/${gameId}`);
     };
 
     const joinGame = (gameId) => {
@@ -88,14 +103,6 @@ function App() {
         setTimeout(() => setCheck(null), 3000);
     };
 
-    const closePopup = () => setCheckmate(null);
-
-    const copyInviteLink = () => {
-        const inviteLink = `${window.location.origin}/game/${gameId}`;
-        navigator.clipboard.writeText(inviteLink);
-        alert(`Invite link copied: ${inviteLink}`);
-    };
-
     return (
         <div style={styles.container}>
             <h1 style={styles.header}>WebSocket Chess Game</h1>
@@ -107,12 +114,27 @@ function App() {
                 <button onClick={resetGame} style={styles.button}>
                     Reset Game
                 </button>
-                {gameId && (
-                    <button onClick={copyInviteLink} style={styles.button}>
-                        Copy Invite Link
-                    </button>
-                )}
             </div>
+
+            {showRolePopup && (
+                <div style={styles.popup}>
+                    <div style={styles.popupContent}>
+                        <h2>Select Your Role</h2>
+                        <button onClick={() => selectRole("white")} style={styles.popupButton}>
+                            Play as White
+                        </button>
+                        <button onClick={() => selectRole("black")} style={styles.popupButton}>
+                            Play as Black
+                        </button>
+                        <button onClick={() => selectRole("random")} style={styles.popupButton}>
+                            Random
+                        </button>
+                        <button onClick={handleInviteLink} style={styles.popupButton}>
+                            Invite Link
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {waitingForPlayer && (
                 <div style={styles.popup}>
@@ -187,22 +209,9 @@ function App() {
 
 const styles = {
     container: { padding: "20px", textAlign: "center" },
-    header: { fontSize: "24px", fontWeight: "bold", marginBottom: "20px" },
+    header: { fontSize: "24px", marginBottom: "20px" },
     controls: { marginBottom: "20px" },
-    gameArea: { display: "flex", justifyContent: "center", alignItems: "center" },
-    captures: { margin: "10px", padding: "10px", border: "1px solid #ccc" },
-    chessboard: { margin: "10px" },
-    history: { margin: "10px", padding: "10px", border: "1px solid #ccc" },
-    button: {
-        margin: "0 10px",
-        padding: "10px 20px",
-        fontSize: "16px",
-        border: "none",
-        borderRadius: "4px",
-        backgroundColor: "#007BFF",
-        color: "#FFF",
-        cursor: "pointer",
-    },
+    button: { padding: "10px 20px", margin: "10px", backgroundColor: "#007BFF", color: "#FFF" },
     popup: {
         position: "fixed",
         top: 0,
@@ -214,46 +223,11 @@ const styles = {
         justifyContent: "center",
         alignItems: "center",
     },
-    popupContent: {
-        backgroundColor: "#FFF",
-        padding: "20px",
-        borderRadius: "10px",
-        textAlign: "center",
-    },
-    popupClose: {
-        marginTop: "10px",
-        padding: "10px",
-        backgroundColor: "#FF0000",
-        color: "#FFF",
-        border: "none",
-        borderRadius: "5px",
-        cursor: "pointer",
-    },
-    popupButton: {
-        margin: "10px",
-        padding: "10px",
-        backgroundColor: "#007BFF",
-        color: "#FFF",
-        border: "none",
-        borderRadius: "5px",
-        cursor: "pointer",
-    },
-    joinButton: {
-        marginLeft: "10px",
-        padding: "5px 10px",
-        backgroundColor: "#28a745",
-        color: "#FFF",
-        border: "none",
-        borderRadius: "5px",
-        cursor: "pointer",
-    },
-    alert: {
-        backgroundColor: "yellow",
-        padding: "10px",
-        borderRadius: "5px",
-        marginBottom: "10px",
-        fontWeight: "bold",
-    },
+    popupContent: { backgroundColor: "#FFF", padding: "20px", borderRadius: "10px" },
+    popupClose: { backgroundColor: "#FF0000", color: "#FFF", marginTop: "10px" },
+    popupButton: { margin: "10px", padding: "10px", backgroundColor: "#007BFF", color: "#FFF" },
+    joinButton: { marginLeft: "10px", padding: "5px 10px", backgroundColor: "#28a745", color: "#FFF" },
+    alert: { backgroundColor: "yellow", padding: "10px", borderRadius: "5px", marginBottom: "10px" },
 };
 
 export default App;

@@ -14,8 +14,8 @@ const io = new Server(server, {
     transports: ["websocket"],
 });
 
-const games = {}; // Object to store active games and metadata
-const openGames = {}; // Object to store open game details for the lobby
+const games = {}; // Store game states
+const openGames = {}; // Store open games for the lobby
 
 console.log("Server starting...");
 
@@ -24,7 +24,16 @@ io.on("connection", (socket) => {
 
     socket.on("disconnect", (reason) => {
         console.log(`Client disconnected: ${socket.id}, Reason: ${reason}`);
-        // Handle game cleanup if needed
+        // Cleanup if a player leaves
+        for (const [gameId, game] of Object.entries(games)) {
+            if (game.players.white === socket.id || game.players.black === socket.id) {
+                delete games[gameId];
+                delete openGames[gameId];
+                io.emit("openGames", Object.values(openGames)); // Update lobby
+                console.log(`Game ${gameId} deleted as player disconnected.`);
+                break;
+            }
+        }
     });
 
     /**
@@ -32,7 +41,7 @@ io.on("connection", (socket) => {
      */
     socket.on("createGame", ({ gameId, role }) => {
         if (!gameId) {
-            gameId = uuidv4(); // Generate a unique ID for the game
+            gameId = uuidv4();
         }
 
         const inviteLink = `${process.env.CLIENT_URL || "http://localhost:3001"}/game/${gameId}`;
@@ -72,7 +81,7 @@ io.on("connection", (socket) => {
         socket.emit("updateHistory", game.moveHistory);
 
         console.log(`Game ${gameId} created with role: ${role}`);
-        io.emit("openGames", Object.values(openGames)); // Notify clients of open games
+        io.emit("openGames", Object.values(openGames)); // Notify lobby
     });
 
     /**
@@ -103,8 +112,24 @@ io.on("connection", (socket) => {
         socket.emit("updateCaptures", game.capturedPieces);
         socket.emit("updateHistory", game.moveHistory);
 
+        // Notify other clients that the game is now full
+        io.to(gameId).emit("startGame");
+        delete openGames[gameId];
+        io.emit("openGames", Object.values(openGames));
+
         console.log(`Player joined game ${gameId}`);
-        io.emit("openGames", Object.values(openGames)); // Update open games for clients
+    });
+
+    /**
+     * Cancel a game
+     */
+    socket.on("cancelGame", (gameId) => {
+        if (games[gameId]) {
+            delete games[gameId];
+            delete openGames[gameId];
+            io.emit("openGames", Object.values(openGames)); // Update lobby
+            console.log(`Game ${gameId} canceled by creator.`);
+        }
     });
 
     /**
@@ -168,7 +193,7 @@ io.on("connection", (socket) => {
 
                 if (game.chess.isCheckmate()) {
                     console.log(`Checkmate detected in game ${gameId}`);
-                    io.to(gameId).emit("gameOver", { reason: "checkmate", winner: game.chess.turn() });
+                    io.to(gameId).emit("gameOver", { reason: "checkmate", winner: turnColor });
                 } else if (game.chess.isCheck()) {
                     console.log(`Check detected in game ${gameId}`);
                     io.to(gameId).emit("inCheck", game.chess.turn());
@@ -183,7 +208,7 @@ io.on("connection", (socket) => {
     });
 
     /**
-     * Update open games list
+     * Periodically update open games
      */
     setInterval(() => {
         io.emit("openGames", Object.values(openGames));
