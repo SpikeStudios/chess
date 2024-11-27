@@ -153,10 +153,10 @@ io.on("connection", (socket) => {
                 io.to(gameId).emit("updateFEN", updatedFEN);
                 io.to(gameId).emit("updateHistory", game.moveHistory);
 
-                if (game.chess.in_checkmate()) {
+                if (game.chess.isCheckmate()) {
                     console.log(`Checkmate detected in game ${gameId}`);
                     io.to(gameId).emit("gameOver", { reason: "checkmate", winner: move.color });
-                } else if (game.chess.in_check()) {
+                } else if (game.chess.isCheck()) {
                     console.log(`Check detected in game ${gameId}`);
                     io.to(gameId).emit("inCheck", game.chess.turn());
                 }
