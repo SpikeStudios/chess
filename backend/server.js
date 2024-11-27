@@ -2,19 +2,19 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const Chess = require("chess.js").Chess;
-const { v4: uuidv4 } = require("uuid"); // Use UUID for unique game IDs
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: process.env.CLIENT_URL || "http://localhost:3001", // Frontend URL
+        origin: process.env.CLIENT_URL || "http://localhost:3001",
         methods: ["GET", "POST"],
     },
     transports: ["websocket"],
 });
 
-const games = {}; // Object to store active games and metadata
+const games = {};
 
 console.log("Server starting...");
 
@@ -25,7 +25,7 @@ io.on("connection", (socket) => {
         console.log(`Client disconnected: ${socket.id}, Reason: ${reason}`);
     });
 
-    socket.on("createGame", (gameId) => {
+    socket.on("createGame", ({ gameId, role }) => {
         if (!gameId || gameId === "default") {
             gameId = uuidv4();
             console.log(`Generated new unique game ID: ${gameId}`);
@@ -36,16 +36,21 @@ io.on("connection", (socket) => {
                 chess: new Chess(),
                 moveHistory: [],
                 capturedPieces: { white: [], black: [] },
+                players: {
+                    white: role === "white" ? socket.id : null,
+                    black: role === "black" ? socket.id : null,
+                },
             };
             console.log(`New game created: ${gameId}`);
         } else {
-            console.log(`Game already exists: ${gameId}`);
+            const players = games[gameId].players;
+            if (role === "white" && !players.white) players.white = socket.id;
+            if (role === "black" && !players.black) players.black = socket.id;
         }
 
         socket.join(gameId);
         const currentFEN = games[gameId].chess.fen();
-        console.log(`Socket ${socket.id} joined game: ${gameId}, FEN: ${currentFEN}`);
-        socket.emit("gameId", gameId); // Notify the client of the current gameId
+        io.to(gameId).emit("gameDetails", { gameId, players: games[gameId].players });
         socket.emit("updateFEN", currentFEN);
         socket.emit("updateCaptures", games[gameId].capturedPieces);
         socket.emit("updateHistory", games[gameId].moveHistory);
@@ -63,7 +68,6 @@ io.on("connection", (socket) => {
         games[gameId].capturedPieces = { white: [], black: [] };
 
         const resetFEN = games[gameId].chess.fen();
-        console.log(`Game reset: ${gameId}, FEN: ${resetFEN}`);
         io.to(gameId).emit("updateFEN", resetFEN);
         io.to(gameId).emit("updateCaptures", games[gameId].capturedPieces);
         io.to(gameId).emit("updateHistory", games[gameId].moveHistory);
@@ -91,31 +95,28 @@ io.on("connection", (socket) => {
                     const capturedPiece = move.captured.toUpperCase();
                     const capturingSide = move.color === "w" ? "black" : "white";
                     game.capturedPieces[capturingSide].push(capturedPiece);
-                    io.to(gameId).emit("updateCaptures", game.capturedPieces);
                 }
 
                 io.to(gameId).emit("updateFEN", updatedFEN);
                 io.to(gameId).emit("updateHistory", game.moveHistory);
+                io.to(gameId).emit("updateCaptures", game.capturedPieces);
 
                 if (chess.in_checkmate()) {
                     console.log(`Checkmate detected in game ${gameId}`);
-                    io.to(gameId).emit("debug", "Checkmate!");
+                    io.to(gameId).emit("gameOver", { reason: "checkmate", winner: move.color });
                 } else if (chess.in_check()) {
-                    console.log(`Check detected in game ${gameId}`);
-                    io.to(gameId).emit("debug", "Check!");
+                    io.to(gameId).emit("inCheck", chess.turn());
                 }
             } else {
-                console.log(`Invalid move: { from: "${from}", to: "${to}" }`);
-                socket.emit("debug", "Invalid move! Please try again.");
+                socket.emit("debug", "Invalid move! Try again.");
             }
         } catch (error) {
-            console.error(`Error processing move for game ${gameId}:`, error.message);
-            socket.emit("debug", `Error: ${error.message}`);
+            console.error(`Error processing move for game ${gameId}: ${error.message}`);
         }
     });
 
     socket.on("error", (error) => {
-        console.error(`Socket error on ${socket.id}:`, error.message);
+        console.error(`Socket error on ${socket.id}: ${error.message}`);
     });
 });
 
