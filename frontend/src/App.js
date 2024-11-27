@@ -10,12 +10,12 @@ function App() {
     const [gameId, setGameId] = useState(null);
     const [capturedPieces, setCapturedPieces] = useState({ white: [], black: [] });
     const [moveHistory, setMoveHistory] = useState([]);
-    const [role, setRole] = useState("random"); // Player's role: "white", "black", or "random"
-    const [orientation, setOrientation] = useState("white"); // Board orientation
-    const [checkmate, setCheckmate] = useState(null); // Checkmate state
-    const [check, setCheck] = useState(null); // Check state
-    const [openGames, setOpenGames] = useState([]); // List of open games
-    const [showRolePopup, setShowRolePopup] = useState(false); // Show popup for role selection
+    const [role, setRole] = useState("random");
+    const [orientation, setOrientation] = useState("white");
+    const [checkmate, setCheckmate] = useState(null);
+    const [check, setCheck] = useState(null);
+    const [openGames, setOpenGames] = useState([]);
+    const [showRolePopup, setShowRolePopup] = useState(false);
 
     useEffect(() => {
         const connectSocket = () => {
@@ -27,13 +27,10 @@ function App() {
                 reconnectionDelayMax: 5000,
             });
 
-            socket.on("connect", () => {
-                console.log("Connected to server:", socket.id);
-            });
-
-            socket.on("updateFEN", (updatedFEN) => setFen(updatedFEN));
-            socket.on("updateCaptures", (captures) => setCapturedPieces(captures));
-            socket.on("updateHistory", (history) => setMoveHistory(history));
+            socket.on("connect", () => console.log("Connected to server:", socket.id));
+            socket.on("updateFEN", setFen);
+            socket.on("updateCaptures", setCapturedPieces);
+            socket.on("updateHistory", setMoveHistory);
             socket.on("gameOver", ({ reason, winner }) => handleGameOver(reason, winner));
             socket.on("inCheck", (turn) => handleCheck(turn));
             socket.on("gameDetails", ({ gameId, players }) => {
@@ -51,13 +48,14 @@ function App() {
     const createGame = () => {
         const newGameId = uuidv4();
         setGameId(newGameId);
-        setShowRolePopup(true); // Show popup for role selection
+        setShowRolePopup(true);
     };
 
     const selectRole = (selectedRole) => {
         setRole(selectedRole);
-        setShowRolePopup(false); // Close popup
-        const selectedOrientation = selectedRole === "random" ? (Math.random() > 0.5 ? "white" : "black") : selectedRole;
+        setShowRolePopup(false);
+        const selectedOrientation =
+            selectedRole === "random" ? (Math.random() > 0.5 ? "white" : "black") : selectedRole;
         setOrientation(selectedOrientation);
         socket.emit("createGame", { gameId, role: selectedRole });
     };
@@ -83,10 +81,16 @@ function App() {
     const handleCheck = (turn) => {
         const checkColor = turn === "w" ? "White" : "Black";
         setCheck(`${checkColor} king is in check!`);
-        setTimeout(() => setCheck(null), 3000); // Clear check highlight after 3 seconds
+        setTimeout(() => setCheck(null), 3000);
     };
 
     const closePopup = () => setCheckmate(null);
+
+    const copyInviteLink = () => {
+        const inviteLink = `${window.location.origin}/game/${gameId}`;
+        navigator.clipboard.writeText(inviteLink);
+        alert(`Invite link copied: ${inviteLink}`);
+    };
 
     return (
         <div style={styles.container}>
@@ -98,6 +102,9 @@ function App() {
                 </button>
                 <button onClick={resetGame} style={styles.button}>
                     Reset Game
+                </button>
+                <button onClick={copyInviteLink} style={styles.button}>
+                    Copy Invite Link
                 </button>
             </div>
 
